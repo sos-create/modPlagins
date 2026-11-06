@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "plugin_tester",
+  "version": "${version}",
+  "name": "Plugin Tester",
+  "description": "Creates folders for staging and organizing Paper plugins for local testing.",
+  "authors": ["sos-create"],
+  "environment": "*",
+  "entrypoints": {
+    "main": ["sos.create.plugintester.PluginTesterMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.4",
+    "java": ">=21"
+  }
+}
