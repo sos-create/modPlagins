@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 @Mod.EventBusSubscriber(modid = PluginTesterMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class PluginTesterMod {
     public static final String MOD_ID = "plugin_tester";
+    private static final String PAPER_VERSION = "1.21.4";
     private static final Path ROOT = FMLPaths.GAMEDIR.get().resolve("mods").resolve("PluginTester");
     private static final Path PLUGINS = ROOT.resolve("plugins");
     private static final Path READY = ROOT.resolve("ready");
@@ -210,7 +211,7 @@ public final class PluginTesterMod {
             }
             Path paper = SERVER.resolve("paper.jar");
             if (Files.notExists(paper)) {
-                feedback.send(Component.literal("[PluginTester] Сначала помести Paper 1.21.4 в mods/PluginTester/server/paper.jar"));
+                feedback.send(Component.literal("[PluginTester] Сначала помести Paper " + PAPER_VERSION + " в mods/PluginTester/server/paper.jar"));
                 return 0;
             }
             Path properties = SERVER.resolve("server.properties");
@@ -360,13 +361,13 @@ public final class PluginTesterMod {
                 "PLUGIN TESTER — Forge / Minecraft 1.21.4\n\n" +
                 "1. Помести Bukkit/Paper .jar в папку plugins.\n" +
                 "2. В игре выполни /plugintester scan — проверка структуры и plugin.yml.\n" +
-                "3. Для реального теста скачай Paper 1.21.4 и положи файл как server/paper.jar.\n" +
+                "3. Для реального теста скачай Paper " + PAPER_VERSION + " и положи файл как server/paper.jar.\n" +
                 "4. Прочитай EULA. Если согласен, поменяй eula=false на eula=true в server/eula.txt.\n" +
                 "5. Выполни /plugintester start. Подключись к localhost.\n" +
                 "6. Логи Paper: reports/paper-console.log.\n" +
                 "7. После успешной загрузки сервера /plugintester promote имя.jar проверяет лог Paper и копирует JAR в ready.\n\n" +
                 "Команды: /plugintester scan | start | stop | status | path | promote <имя.jar>\n" +
-                "Paper-плагины не работают внутри одиночного мира Forge. Запускается отдельный локальный Paper-сервер.\n" +
+                "Мод работает на Forge 1.21.11, а плагины запускаются на отдельном Paper " + PAPER_VERSION + " сервере. Paper-плагины не работают внутри одиночного мира Forge. Запускается отдельный локальный Paper-сервер.\n" +
                 "Сервер использует Java 21, -Xms512M и -Xmx1024M. Для остановки используй /plugintester stop.\n");
         }
     }
