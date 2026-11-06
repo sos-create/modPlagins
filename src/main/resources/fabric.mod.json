@@ -3,14 +3,15 @@
   "id": "plugin_tester",
   "version": "${version}",
   "name": "Plugin Tester",
-  "description": "Creates folders for staging and organizing Paper plugins for local testing.",
+  "description": "Lightweight local Paper plugin checker and test server manager.",
   "authors": ["sos-create"],
-  "environment": "*",
+  "environment": "client",
   "entrypoints": {
-    "main": ["sos.create.plugintester.PluginTesterMod"]
+    "client": ["sos.create.plugintester.PluginTesterMod"]
   },
   "depends": {
     "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
     "minecraft": "~1.21.4",
     "java": ">=21"
   }
