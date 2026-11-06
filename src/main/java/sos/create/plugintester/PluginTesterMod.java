@@ -15,7 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class PluginTesterMod implements ClientModInitializer {
-    private static final Path ROOT = FabricLoader.getInstance().getGameDir().resolve("PluginTester");
+    private static final Path ROOT = FabricLoader.getInstance().getGameDir().resolve("mods").resolve("PluginTester");
     private static final Path PLUGINS = ROOT.resolve("plugins");
     private static final Path READY = ROOT.resolve("ready");
     private static final Path REPORTS = ROOT.resolve("reports");
@@ -40,6 +40,7 @@ public final class PluginTesterMod implements ClientModInitializer {
             Files.createDirectories(READY);
             Files.createDirectories(REPORTS);
             Files.createDirectories(SERVER);
+            migrateLegacyPlugins();
             createInstructions();
         } catch (IOException e) {
             System.err.println("[PluginTester] Cannot create folders: " + e.getMessage());
@@ -201,7 +202,7 @@ public final class PluginTesterMod implements ClientModInitializer {
             }
             Path paper = SERVER.resolve("paper.jar");
             if (Files.notExists(paper)) {
-                feedback.send(Text.literal("[PluginTester] Сначала помести Paper 1.21.4 в PluginTester/server/paper.jar"));
+                feedback.send(Text.literal("[PluginTester] Сначала помести Paper 1.21.4 в mods/PluginTester/server/paper.jar"));
                 return 0;
             }
             Path properties = SERVER.resolve("server.properties");
@@ -310,6 +311,23 @@ public final class PluginTesterMod implements ClientModInitializer {
         } catch (Exception e) {
             feedback.send(Text.literal("[PluginTester] Ошибка переноса: " + e.getMessage()));
             return 0;
+        }
+    }
+
+    private static void migrateLegacyPlugins() throws IOException {
+        Path legacyPlugins = FabricLoader.getInstance().getGameDir()
+            .resolve("PluginTester").resolve("plugins");
+        if (Files.isDirectory(legacyPlugins)) {
+            try (var stream = Files.list(legacyPlugins)) {
+                for (Path file : stream
+                    .filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .toList()) {
+                    Path destination = PLUGINS.resolve(file.getFileName());
+                    if (Files.notExists(destination)) {
+                        Files.copy(file, destination);
+                    }
+                }
+            }
         }
     }
 
