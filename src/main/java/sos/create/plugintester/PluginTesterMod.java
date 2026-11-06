@@ -120,12 +120,12 @@ public final class PluginTesterMod {
             }
             Path reportFile = REPORTS.resolve("scan-" + System.currentTimeMillis() + ".txt");
             Files.writeString(reportFile, report);
-            feedback.send(Text.literal("[PluginTester] Проверено: " + results.size()
+            feedback.send(Component.literal("[PluginTester] Проверено: " + results.size()
                 + ", без структурных ошибок: " + passed + ". Отчёт: " + reportFile.getFileName()));
-            feedback.send(Text.literal("[PluginTester] Это статическая проверка, не гарантия совместимости. Для запуска: /plugintester start"));
+            feedback.send(Component.literal("[PluginTester] Это статическая проверка, не гарантия совместимости. Для запуска: /plugintester start"));
             return results.size();
         } catch (Exception e) {
-            feedback.send(Text.literal("[PluginTester] Ошибка проверки: " + e.getMessage()));
+            feedback.send(Component.literal("[PluginTester] Ошибка проверки: " + e.getMessage()));
             return 0;
         }
     }
@@ -205,12 +205,12 @@ public final class PluginTesterMod {
     private static int start(Feedback feedback) {
         try {
             if (serverProcess != null && serverProcess.isAlive()) {
-                feedback.send(Text.literal("[PluginTester] Тестовый сервер уже запущен."));
+                feedback.send(Component.literal("[PluginTester] Тестовый сервер уже запущен."));
                 return 1;
             }
             Path paper = SERVER.resolve("paper.jar");
             if (Files.notExists(paper)) {
-                feedback.send(Text.literal("[PluginTester] Сначала помести Paper 1.21.4 в mods/PluginTester/server/paper.jar"));
+                feedback.send(Component.literal("[PluginTester] Сначала помести Paper 1.21.4 в mods/PluginTester/server/paper.jar"));
                 return 0;
             }
             Path properties = SERVER.resolve("server.properties");
@@ -220,7 +220,7 @@ public final class PluginTesterMod {
             Path eula = SERVER.resolve("eula.txt");
             if (Files.notExists(eula) || !Files.readString(eula).contains("eula=true")) {
                 if (Files.notExists(eula)) Files.writeString(eula, "eula=false\n");
-                feedback.send(Text.literal("[PluginTester] Для запуска прочитай EULA Minecraft и, если согласен, измени server/eula.txt на eula=true."));
+                feedback.send(Component.literal("[PluginTester] Для запуска прочитай EULA Minecraft и, если согласен, измени server/eula.txt на eula=true."));
                 return 0;
             }
             Path serverPlugins = SERVER.resolve("plugins");
@@ -238,11 +238,11 @@ public final class PluginTesterMod {
                 "-XX:ParallelGCThreads=2", "-XX:ConcGCThreads=1", "-jar", "paper.jar", "--nogui")
                 .directory(SERVER.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             serverProcess = builder.start();
-            feedback.send(Text.literal("[PluginTester] Paper запускается. RAM: 512 МБ–1 ГБ. Лог: reports/paper-console.log"));
-            feedback.send(Text.literal("[PluginTester] Подключение в Minecraft: localhost (если сервер успешно загрузился)."));
+            feedback.send(Component.literal("[PluginTester] Paper запускается. RAM: 512 МБ–1 ГБ. Лог: reports/paper-console.log"));
+            feedback.send(Component.literal("[PluginTester] Подключение в Minecraft: localhost (если сервер успешно загрузился)."));
             return 1;
         } catch (Exception e) {
-            feedback.send(Text.literal("[PluginTester] Не удалось запустить Paper: " + e.getMessage()));
+            feedback.send(Component.literal("[PluginTester] Не удалось запустить Paper: " + e.getMessage()));
             return 0;
         }
     }
@@ -255,22 +255,22 @@ public final class PluginTesterMod {
     private static int stop(Feedback feedback) {
         try {
             if (serverProcess == null || !serverProcess.isAlive()) {
-                feedback.send(Text.literal("[PluginTester] Сервер не запущен."));
+                feedback.send(Component.literal("[PluginTester] Сервер не запущен."));
                 return 0;
             }
             serverProcess.getOutputStream().write("stop\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             serverProcess.getOutputStream().flush();
-            feedback.send(Text.literal("[PluginTester] Команда остановки отправлена Paper."));
+            feedback.send(Component.literal("[PluginTester] Команда остановки отправлена Paper."));
             return 1;
         } catch (IOException e) {
-            feedback.send(Text.literal("[PluginTester] Не удалось отправить stop: " + e.getMessage()));
+            feedback.send(Component.literal("[PluginTester] Не удалось отправить stop: " + e.getMessage()));
             return 0;
         }
     }
 
     private static int status(Feedback feedback) {
         boolean running = serverProcess != null && serverProcess.isAlive();
-        feedback.send(Text.literal("[PluginTester] Paper: " + (running ? "работает" : "остановлен")));
+        feedback.send(Component.literal("[PluginTester] Paper: " + (running ? "работает" : "остановлен")));
         return running ? 1 : 0;
     }
 
@@ -293,26 +293,26 @@ public final class PluginTesterMod {
         try {
             Path name = Path.of(fileName);
             if (name.isAbsolute() || name.getNameCount() != 1 || !name.getFileName().toString().endsWith(".jar")) {
-                feedback.send(Text.literal("[PluginTester] Укажи только имя JAR-файла, без путей."));
+                feedback.send(Component.literal("[PluginTester] Укажи только имя JAR-файла, без путей."));
                 return 0;
             }
             Path source = PLUGINS.resolve(name);
             if (Files.notExists(source)) {
-                feedback.send(Text.literal("[PluginTester] Файл не найден в папке plugins."));
+                feedback.send(Component.literal("[PluginTester] Файл не найден в папке plugins."));
                 return 0;
             }
             ScanResult result = inspect(source);
             if (!result.errors.isEmpty()) {
-                feedback.send(Text.literal("[PluginTester] Нельзя перенести: статическая проверка нашла ошибки."));
+                feedback.send(Component.literal("[PluginTester] Нельзя перенести: статическая проверка нашла ошибки."));
                 return 0;
             }
             Path log = REPORTS.resolve("paper-console.log");
             if (result.pluginName == null || Files.notExists(log)) {
-                feedback.send(Text.literal("[PluginTester] Сначала запусти Paper и проверь плагин на сервере."));
+                feedback.send(Component.literal("[PluginTester] Сначала запусти Paper и проверь плагин на сервере."));
                 return 0;
             }
             if (serverProcess == null || !serverProcess.isAlive()) {
-                feedback.send(Text.literal("[PluginTester] Тестовый Paper-сервер сейчас не работает. Запусти его и дождись полной загрузки."));
+                feedback.send(Component.literal("[PluginTester] Тестовый Paper-сервер сейчас не работает. Запусти его и дождись полной загрузки."));
                 return 0;
             }
             String console = Files.readString(log).toLowerCase(Locale.ROOT);
@@ -325,14 +325,14 @@ public final class PluginTesterMod {
                 || console.contains("error occurred while enabling " + plugin)
                 || console.contains("failed to load plugin " + plugin);
             if (!enabled || !completed || failed) {
-                feedback.send(Text.literal("[PluginTester] Плагин не подтверждён логом Paper. Проверь reports/paper-console.log и исправь ошибки."));
+                feedback.send(Component.literal("[PluginTester] Плагин не подтверждён логом Paper. Проверь reports/paper-console.log и исправь ошибки."));
                 return 0;
             }
             Files.copy(source, READY.resolve(name), StandardCopyOption.REPLACE_EXISTING);
-            feedback.send(Text.literal("[PluginTester] Плагин прошёл базовую проверку структуры и найден в логе успешной загрузки Paper. Скопирован в ready."));
+            feedback.send(Component.literal("[PluginTester] Плагин прошёл базовую проверку структуры и найден в логе успешной загрузки Paper. Скопирован в ready."));
             return 1;
         } catch (Exception e) {
-            feedback.send(Text.literal("[PluginTester] Ошибка переноса: " + e.getMessage()));
+            feedback.send(Component.literal("[PluginTester] Ошибка переноса: " + e.getMessage()));
             return 0;
         }
     }
