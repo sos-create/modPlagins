@@ -4,7 +4,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
-import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -16,6 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Mod(PluginTesterMod.MOD_ID)
+@Mod.EventBusSubscriber(modid = PluginTesterMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = net.minecraftforge.api.distmarker.Dist.CLIENT)
 public final class PluginTesterMod {
     public static final String MOD_ID = "plugin_tester";
     private static final String PAPER_VERSION = "1.21.4";
@@ -39,7 +40,6 @@ public final class PluginTesterMod {
 
     public PluginTesterMod() {
         try {
-            MinecraftForge.EVENT_BUS.addListener(PluginTesterMod::onRegisterClientCommands);
             Files.createDirectories(PLUGINS);
             Files.createDirectories(READY);
             Files.createDirectories(REPORTS);
@@ -52,6 +52,7 @@ public final class PluginTesterMod {
 
     }
 
+    @SubscribeEvent
     public static void onRegisterClientCommands(RegisterClientCommandsEvent event) {
         var dispatcher = event.getDispatcher();
         dispatcher.register(Commands.literal("plugintester")
