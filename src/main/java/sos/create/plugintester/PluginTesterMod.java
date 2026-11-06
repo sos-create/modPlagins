@@ -23,6 +23,17 @@ public final class PluginTesterMod implements ClientModInitializer {
     private static final Path SERVER = ROOT.resolve("server");
     private static Process serverProcess;
 
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (serverProcess != null && serverProcess.isAlive()) {
+                try {
+                    serverProcess.getOutputStream().write("stop\\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    serverProcess.getOutputStream().flush();
+                } catch (IOException ignored) { }
+            }
+        }, "PluginTester-shutdown"));
+    }
+
     @Override
     public void onInitializeClient() {
         try {
@@ -168,6 +179,10 @@ public final class PluginTesterMod implements ClientModInitializer {
                 feedback.send(Text.literal("[PluginTester] Сначала помести Paper 1.21.4 в PluginTester/server/paper.jar"));
                 return 0;
             }
+            Path properties = SERVER.resolve("server.properties");
+            if (Files.notExists(properties)) {
+                Files.writeString(properties, "view-distance=4\\nsimulation-distance=3\\nmax-players=1\\n");
+            }
             Path eula = SERVER.resolve("eula.txt");
             if (Files.notExists(eula) || !Files.readString(eula).contains("eula=true")) {
                 if (Files.notExists(eula)) Files.writeString(eula, "eula=false\n");
@@ -183,7 +198,8 @@ public final class PluginTesterMod implements ClientModInitializer {
             }
             Path log = REPORTS.resolve("paper-console.log");
             ProcessBuilder builder = new ProcessBuilder(javaExecutable(), "-Xms512M", "-Xmx1024M",
-                "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-jar", "paper.jar", "--nogui")
+                "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-XX:ActiveProcessorCount=2",
+                "-XX:ParallelGCThreads=2", "-XX:ConcGCThreads=1", "-jar", "paper.jar", "--nogui")
                 .directory(SERVER.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             serverProcess = builder.start();
             feedback.send(Text.literal("[PluginTester] Paper запускается. RAM: 512 МБ–1 ГБ. Лог: reports/paper-console.log"));
