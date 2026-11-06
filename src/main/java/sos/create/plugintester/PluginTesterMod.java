@@ -24,13 +24,13 @@ public final class PluginTesterMod implements ModInitializer {
             Files.createDirectories(root.resolve("reports"));
             Files.createDirectories(root.resolve("server"));
 
-            Path readme = root.resolve("PUT_PAPER_PLUGINS_HERE.txt");
-            if (Files.notExists(readme)) {
-                Files.writeString(readme,
-                    "PluginTester for Minecraft 1.21.4\\n\\n" +
-                    "Put Paper/Bukkit plugin .jar files in the plugins folder.\\n" +
-                    "IMPORTANT: A Fabric singleplayer world cannot load Paper plugins.\\n" +
-                    "These folders only organize files; actual testing requires a separate local Paper server.\\n");
+            Path instructions = root.resolve("PUT_PAPER_PLUGINS_HERE.txt");
+            if (Files.notExists(instructions)) {
+                Files.writeString(instructions,
+                    "PluginTester for Minecraft 1.21.4\n\n" +
+                    "Put Paper/Bukkit plugin .jar files in the plugins folder.\n" +
+                    "IMPORTANT: A Fabric singleplayer world cannot load Paper plugins.\n" +
+                    "These folders only organize files; actual testing requires a separate local Paper server.\n");
             }
             LOGGER.info("Plugin Tester folders are ready: {}", root.toAbsolutePath());
         } catch (IOException exception) {
