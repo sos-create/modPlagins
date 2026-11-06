@@ -1,0 +1,1 @@
+Temporary CI trigger for verifying the current Plugin Tester build. This branch is not intended for merging.
