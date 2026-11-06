@@ -1,11 +1,13 @@
 package sos.create.plugintester;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.text.Text;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterClientCommandsEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -14,8 +16,11 @@ import java.util.jar.JarFile;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class PluginTesterMod implements ClientModInitializer {
-    private static final Path ROOT = FabricLoader.getInstance().getGameDir().resolve("mods").resolve("PluginTester");
+@Mod(PluginTesterMod.MOD_ID)
+@Mod.EventBusSubscriber(modid = PluginTesterMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
+public final class PluginTesterMod {
+    public static final String MOD_ID = "plugin_tester";
+    private static final Path ROOT = FMLPaths.GAMEDIR.get().resolve("mods").resolve("PluginTester");
     private static final Path PLUGINS = ROOT.resolve("plugins");
     private static final Path READY = ROOT.resolve("ready");
     private static final Path REPORTS = ROOT.resolve("reports");
@@ -33,8 +38,7 @@ public final class PluginTesterMod implements ClientModInitializer {
         }, "PluginTester-shutdown"));
     }
 
-    @Override
-    public void onInitializeClient() {
+    public PluginTesterMod() {
         try {
             Files.createDirectories(PLUGINS);
             Files.createDirectories(READY);
@@ -46,21 +50,25 @@ public final class PluginTesterMod implements ClientModInitializer {
             System.err.println("[PluginTester] Cannot create folders: " + e.getMessage());
         }
 
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-            dispatcher.register(ClientCommandManager.literal("plugintester")
-                .then(ClientCommandManager.literal("scan").executes(ctx -> scan(ctx.getSource()::sendFeedback)))
-                .then(ClientCommandManager.literal("start").executes(ctx -> start(ctx.getSource()::sendFeedback)))
-                .then(ClientCommandManager.literal("stop").executes(ctx -> stop(ctx.getSource()::sendFeedback)))
-                .then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource()::sendFeedback)))
-                .then(ClientCommandManager.literal("promote")
-                    .then(ClientCommandManager.argument("file", StringArgumentType.greedyString())
-                        .executes(ctx -> promote(StringArgumentType.getString(ctx, "file"), ctx.getSource()::sendFeedback))))
-            )
+    }
+
+    @SubscribeEvent
+    public static void onRegisterClientCommands(RegisterClientCommandsEvent event) {
+        var dispatcher = event.getDispatcher();
+        dispatcher.register(Commands.literal("plugintester")
+            .then(Commands.literal("scan").executes(ctx -> scan(ctx.getSource()::sendSystemMessage)))
+            .then(Commands.literal("start").executes(ctx -> start(ctx.getSource()::sendSystemMessage)))
+            .then(Commands.literal("stop").executes(ctx -> stop(ctx.getSource()::sendSystemMessage)))
+            .then(Commands.literal("status").executes(ctx -> status(ctx.getSource()::sendSystemMessage)))
+            .then(Commands.literal("path").executes(ctx -> path(ctx.getSource()::sendSystemMessage)))
+            .then(Commands.literal("promote")
+                .then(Commands.argument("file", StringArgumentType.greedyString())
+                    .executes(ctx -> promote(StringArgumentType.getString(ctx, "file"), ctx.getSource()::sendSystemMessage))))
         );
     }
 
     @FunctionalInterface
-    private interface Feedback { void send(Text message); }
+    private interface Feedback { void send(Component message); }
 
     private static int scan(Feedback feedback) {
         try {
@@ -71,7 +79,7 @@ public final class PluginTesterMod implements ClientModInitializer {
                     .sorted().toList();
             }
             if (jars.isEmpty()) {
-                feedback.send(Text.literal("[PluginTester] Папка plugins пуста: " + PLUGINS));
+                feedback.send(Component.literal("[PluginTester] Папка plugins пуста: " + PLUGINS));
                 return 0;
             }
 
@@ -266,6 +274,21 @@ public final class PluginTesterMod implements ClientModInitializer {
         return running ? 1 : 0;
     }
 
+    private static int path(Feedback feedback) {
+        try {
+            Files.createDirectories(PLUGINS);
+            Files.createDirectories(READY);
+            Files.createDirectories(REPORTS);
+            Files.createDirectories(SERVER);
+            feedback.send(Component.literal("[PluginTester] Папка плагинов: " + PLUGINS.toAbsolutePath()));
+            feedback.send(Component.literal("[PluginTester] Папка Paper: " + SERVER.toAbsolutePath()));
+            return 1;
+        } catch (IOException e) {
+            feedback.send(Component.literal("[PluginTester] Не удалось создать папки: " + e.getMessage()));
+            return 0;
+        }
+    }
+
     private static int promote(String fileName, Feedback feedback) {
         try {
             Path name = Path.of(fileName);
@@ -315,8 +338,7 @@ public final class PluginTesterMod implements ClientModInitializer {
     }
 
     private static void migrateLegacyPlugins() throws IOException {
-        Path legacyPlugins = FabricLoader.getInstance().getGameDir()
-            .resolve("PluginTester").resolve("plugins");
+        Path legacyPlugins = FMLPaths.GAMEDIR.get().resolve("PluginTester").resolve("plugins");
         if (Files.isDirectory(legacyPlugins)) {
             try (var stream = Files.list(legacyPlugins)) {
                 for (Path file : stream
@@ -335,7 +357,7 @@ public final class PluginTesterMod implements ClientModInitializer {
         Path instructions = ROOT.resolve("ИНСТРУКЦИЯ.txt");
         if (Files.notExists(instructions)) {
             Files.writeString(instructions,
-                "PLUGIN TESTER — Minecraft 1.21.4\n\n" +
+                "PLUGIN TESTER — Forge / Minecraft 1.21.4\n\n" +
                 "1. Помести Bukkit/Paper .jar в папку plugins.\n" +
                 "2. В игре выполни /plugintester scan — проверка структуры и plugin.yml.\n" +
                 "3. Для реального теста скачай Paper 1.21.4 и положи файл как server/paper.jar.\n" +
@@ -343,8 +365,8 @@ public final class PluginTesterMod implements ClientModInitializer {
                 "5. Выполни /plugintester start. Подключись к localhost.\n" +
                 "6. Логи Paper: reports/paper-console.log.\n" +
                 "7. После успешной загрузки сервера /plugintester promote имя.jar проверяет лог Paper и копирует JAR в ready.\n\n" +
-                "Команды: /plugintester scan | start | stop | status | promote <имя.jar>\n" +
-                "Paper-плагины не работают внутри одиночного мира Fabric. Запускается отдельный локальный Paper-сервер.\n" +
+                "Команды: /plugintester scan | start | stop | status | path | promote <имя.jar>\n" +
+                "Paper-плагины не работают внутри одиночного мира Forge. Запускается отдельный локальный Paper-сервер.\n" +
                 "Сервер использует Java 21, -Xms512M и -Xmx1024M. Для остановки используй /plugintester stop.\n");
         }
     }
