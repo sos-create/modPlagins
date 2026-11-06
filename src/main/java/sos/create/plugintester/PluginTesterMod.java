@@ -13,7 +13,6 @@ import java.util.*;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 public final class PluginTesterMod implements ClientModInitializer {
     private static final Path ROOT = FabricLoader.getInstance().getGameDir().resolve("PluginTester");
@@ -84,9 +83,14 @@ public final class PluginTesterMod implements ClientModInitializer {
             }
 
             for (ScanResult result : results) {
-                for (String dependency : result.dependencies) {
+                for (String dependency : result.requiredDependencies) {
                     if (!pluginNames.contains(dependency.toLowerCase(Locale.ROOT))) {
-                        result.warnings.add("Не найдена зависимость: " + dependency);
+                        result.errors.add("Не найдена обязательная зависимость: " + dependency);
+                    }
+                }
+                for (String dependency : result.optionalDependencies) {
+                    if (!pluginNames.contains(dependency.toLowerCase(Locale.ROOT))) {
+                        result.warnings.add("Не найдена необязательная зависимость: " + dependency);
                     }
                 }
             }
@@ -138,7 +142,8 @@ public final class PluginTesterMod implements ClientModInitializer {
                 String classPath = result.mainClass.replace('.', '/') + ".class";
                 if (jar.getJarEntry(classPath) == null) result.errors.add("Главный класс не найден в JAR: " + result.mainClass);
             }
-            result.dependencies.addAll(dependencies(yaml));
+            result.requiredDependencies.addAll(readYamlList(yaml, "depend"));
+            result.optionalDependencies.addAll(readYamlList(yaml, "softdepend"));
             if (result.pluginName == null || result.mainClass == null) result.warnings.add("Дескриптор заполнен не полностью.");
         } catch (Exception e) {
             result.errors.add("Не удалось прочитать JAR: " + e.getMessage());
@@ -151,21 +156,41 @@ public final class PluginTesterMod implements ClientModInitializer {
         return matcher.find() ? matcher.group(1).trim() : null;
     }
 
-    private static List<String> dependencies(String yaml) {
+    private static List<String> readYamlList(String yaml, String key) {
         List<String> found = new ArrayList<>();
         boolean inSection = false;
-        for (String line : yaml.split("\\R")) {
-            if (line.matches("^(depend|depend:|softdepend|softdepend:|loadbefore|loadbefore:)\\s*:?.*$")) {
+        Pattern section = Pattern.compile("^" + Pattern.quote(key) + "\\s*:\\s*(.*)$");
+        for (String rawLine : yaml.split("\\R")) {
+            String line = rawLine.replaceFirst("\\s+#.*$", "").trim();
+            Matcher header = section.matcher(line);
+            if (header.matches()) {
                 inSection = true;
+                String value = header.group(1).trim();
+                if (value.startsWith("[") && value.endsWith("]")) {
+                    String inside = value.substring(1, value.length() - 1);
+                    for (String item : inside.split(",")) addYamlValue(found, item);
+                    inSection = false;
+                } else if (!value.isEmpty()) {
+                    addYamlValue(found, value);
+                    inSection = false;
+                }
                 continue;
             }
-            if (inSection && !line.isBlank() && !Character.isWhitespace(line.charAt(0))) inSection = false;
             if (inSection) {
-                Matcher m = Pattern.compile("^\\s+-\\s*([A-Za-z0-9_.-]+)\\s*$").matcher(line);
-                if (m.find()) found.add(m.group(1));
+                if (!rawLine.isEmpty() && !Character.isWhitespace(rawLine.charAt(0))) {
+                    inSection = false;
+                    continue;
+                }
+                Matcher item = Pattern.compile("^\\s+-\\s*(.+?)\\s*$").matcher(rawLine);
+                if (item.matches()) addYamlValue(found, item.group(1));
             }
         }
         return found;
+    }
+
+    private static void addYamlValue(List<String> target, String raw) {
+        String value = raw.trim().replaceAll("^['\\\"]|['\\\"]$", "");
+        if (value.matches("[A-Za-z0-9_.-]+") && !target.contains(value)) target.add(value);
     }
 
     private static int start(Feedback feedback) {
@@ -197,6 +222,8 @@ public final class PluginTesterMod implements ClientModInitializer {
                 }
             }
             Path log = REPORTS.resolve("paper-console.log");
+            Files.deleteIfExists(log);
+            Files.createFile(log);
             ProcessBuilder builder = new ProcessBuilder(javaExecutable(), "-Xms512M", "-Xmx1024M",
                 "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-XX:ActiveProcessorCount=2",
                 "-XX:ParallelGCThreads=2", "-XX:ConcGCThreads=1", "-jar", "paper.jar", "--nogui")
@@ -260,12 +287,19 @@ public final class PluginTesterMod implements ClientModInitializer {
                 feedback.send(Text.literal("[PluginTester] Сначала запусти Paper и проверь плагин на сервере."));
                 return 0;
             }
+            if (serverProcess == null || !serverProcess.isAlive()) {
+                feedback.send(Text.literal("[PluginTester] Тестовый Paper-сервер сейчас не работает. Запусти его и дождись полной загрузки."));
+                return 0;
+            }
             String console = Files.readString(log).toLowerCase(Locale.ROOT);
             String plugin = result.pluginName.toLowerCase(Locale.ROOT);
-            boolean enabled = console.contains("enabling " + plugin) || console.contains("loading server plugin " + plugin);
+            boolean enabled = console.contains("enabling " + plugin)
+                || console.contains("loading server plugin " + plugin)
+                || console.contains("enabled " + plugin);
             boolean completed = console.contains("done (");
-            boolean failed = console.contains("could not load") && console.contains(name.toString().toLowerCase(Locale.ROOT))
-                || console.contains("error occurred while enabling " + plugin);
+            boolean failed = (console.contains("could not load") && console.contains(name.toString().toLowerCase(Locale.ROOT)))
+                || console.contains("error occurred while enabling " + plugin)
+                || console.contains("failed to load plugin " + plugin);
             if (!enabled || !completed || failed) {
                 feedback.send(Text.literal("[PluginTester] Плагин не подтверждён логом Paper. Проверь reports/paper-console.log и исправь ошибки."));
                 return 0;
@@ -301,7 +335,8 @@ public final class PluginTesterMod implements ClientModInitializer {
         final Path file;
         final List<String> errors = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
-        final List<String> dependencies = new ArrayList<>();
+        final List<String> requiredDependencies = new ArrayList<>();
+        final List<String> optionalDependencies = new ArrayList<>();
         String pluginName;
         String mainClass;
         ScanResult(Path file) { this.file = file; }
