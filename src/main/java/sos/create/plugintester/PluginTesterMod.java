@@ -181,7 +181,7 @@ public final class PluginTesterMod implements ClientModInitializer {
             }
             Path properties = SERVER.resolve("server.properties");
             if (Files.notExists(properties)) {
-                Files.writeString(properties, "view-distance=4\\nsimulation-distance=3\\nmax-players=1\\n");
+                Files.writeString(properties, "view-distance=4\nsimulation-distance=3\nmax-players=1\n");
             }
             Path eula = SERVER.resolve("eula.txt");
             if (Files.notExists(eula) || !Files.readString(eula).contains("eula=true")) {
