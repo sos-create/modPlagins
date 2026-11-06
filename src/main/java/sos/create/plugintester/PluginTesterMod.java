@@ -27,7 +27,7 @@ public final class PluginTesterMod implements ClientModInitializer {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             if (serverProcess != null && serverProcess.isAlive()) {
                 try {
-                    serverProcess.getOutputStream().write("stop\\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    serverProcess.getOutputStream().write("stop\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                     serverProcess.getOutputStream().flush();
                 } catch (IOException ignored) { }
             }
