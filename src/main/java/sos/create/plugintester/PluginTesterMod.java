@@ -206,14 +206,12 @@ public final class PluginTesterMod implements ClientModInitializer {
                 feedback.send(Text.literal("[PluginTester] Сервер не запущен."));
                 return 0;
             }
-            // The process is stopped gracefully through the helper console command file.
-            Path stopFlag = SERVER.resolve("STOP_SERVER");
-            Files.writeString(stopFlag, "stop");
-            feedback.send(Text.literal("[PluginTester] Для безопасной остановки введи stop в консоль Paper. Затем сервер завершится."));
-            feedback.send(Text.literal("[PluginTester] Консольный вывод находится в reports/paper-console.log."));
+            serverProcess.getOutputStream().write("stop\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            serverProcess.getOutputStream().flush();
+            feedback.send(Text.literal("[PluginTester] Команда остановки отправлена Paper."));
             return 1;
         } catch (IOException e) {
-            feedback.send(Text.literal("[PluginTester] Ошибка: " + e.getMessage()));
+            feedback.send(Text.literal("[PluginTester] Не удалось отправить stop: " + e.getMessage()));
             return 0;
         }
     }
@@ -238,11 +236,26 @@ public final class PluginTesterMod implements ClientModInitializer {
             }
             ScanResult result = inspect(source);
             if (!result.errors.isEmpty()) {
-                feedback.send(Text.literal("[PluginTester] Нельзя перенести: статическая проверка нашла ошибки. Сначала исправь их."));
+                feedback.send(Text.literal("[PluginTester] Нельзя перенести: статическая проверка нашла ошибки."));
+                return 0;
+            }
+            Path log = REPORTS.resolve("paper-console.log");
+            if (result.pluginName == null || Files.notExists(log)) {
+                feedback.send(Text.literal("[PluginTester] Сначала запусти Paper и проверь плагин на сервере."));
+                return 0;
+            }
+            String console = Files.readString(log).toLowerCase(Locale.ROOT);
+            String plugin = result.pluginName.toLowerCase(Locale.ROOT);
+            boolean enabled = console.contains("enabling " + plugin) || console.contains("loading server plugin " + plugin);
+            boolean completed = console.contains("done (");
+            boolean failed = console.contains("could not load") && console.contains(name.toString().toLowerCase(Locale.ROOT))
+                || console.contains("error occurred while enabling " + plugin);
+            if (!enabled || !completed || failed) {
+                feedback.send(Text.literal("[PluginTester] Плагин не подтверждён логом Paper. Проверь reports/paper-console.log и исправь ошибки."));
                 return 0;
             }
             Files.copy(source, READY.resolve(name), StandardCopyOption.REPLACE_EXISTING);
-            feedback.send(Text.literal("[PluginTester] Файл скопирован в ready. Важно: это не подтверждает успешную работу на сервере."));
+            feedback.send(Text.literal("[PluginTester] Плагин прошёл базовую проверку структуры и найден в логе успешной загрузки Paper. Скопирован в ready."));
             return 1;
         } catch (Exception e) {
             feedback.send(Text.literal("[PluginTester] Ошибка переноса: " + e.getMessage()));
@@ -261,10 +274,10 @@ public final class PluginTesterMod implements ClientModInitializer {
                 "4. Прочитай EULA. Если согласен, поменяй eula=false на eula=true в server/eula.txt.\n" +
                 "5. Выполни /plugintester start. Подключись к localhost.\n" +
                 "6. Логи Paper: reports/paper-console.log.\n" +
-                "7. /plugintester promote имя.jar копирует JAR в ready после статической проверки.\n\n" +
+                "7. После успешной загрузки сервера /plugintester promote имя.jar проверяет лог Paper и копирует JAR в ready.\n\n" +
                 "Команды: /plugintester scan | start | stop | status | promote <имя.jar>\n" +
                 "Paper-плагины не работают внутри одиночного мира Fabric. Запускается отдельный локальный Paper-сервер.\n" +
-                "Сервер использует Java 21, -Xms512M и -Xmx1024M. Для остановки введи stop в консоль Paper.\n");
+                "Сервер использует Java 21, -Xms512M и -Xmx1024M. Для остановки используй /plugintester stop.\n");
         }
     }
 
