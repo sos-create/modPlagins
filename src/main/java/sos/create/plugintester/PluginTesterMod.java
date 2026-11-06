@@ -1,40 +1,280 @@
 package sos.create.plugintester;
 
-import net.fabricmc.api.ModInitializer;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.loader.api.FabricLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.minecraft.text.Text;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.*;
+import java.util.*;
+import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-public final class PluginTesterMod implements ModInitializer {
-    private static final Logger LOGGER = LoggerFactory.getLogger("PluginTester");
-    private static final String ROOT = "PluginTester";
+public final class PluginTesterMod implements ClientModInitializer {
+    private static final Path ROOT = FabricLoader.getInstance().getGameDir().resolve("PluginTester");
+    private static final Path PLUGINS = ROOT.resolve("plugins");
+    private static final Path READY = ROOT.resolve("ready");
+    private static final Path REPORTS = ROOT.resolve("reports");
+    private static final Path SERVER = ROOT.resolve("server");
+    private static Process serverProcess;
 
     @Override
-    public void onInitialize() {
-        Path gameDir = FabricLoader.getInstance().getGameDir();
-        Path root = gameDir.resolve(ROOT);
-
+    public void onInitializeClient() {
         try {
-            Files.createDirectories(root.resolve("plugins"));
-            Files.createDirectories(root.resolve("ready"));
-            Files.createDirectories(root.resolve("reports"));
-            Files.createDirectories(root.resolve("server"));
-
-            Path instructions = root.resolve("PUT_PAPER_PLUGINS_HERE.txt");
-            if (Files.notExists(instructions)) {
-                Files.writeString(instructions,
-                    "PluginTester for Minecraft 1.21.4\n\n" +
-                    "Put Paper/Bukkit plugin .jar files in the plugins folder.\n" +
-                    "IMPORTANT: A Fabric singleplayer world cannot load Paper plugins.\n" +
-                    "These folders only organize files; actual testing requires a separate local Paper server.\n");
-            }
-            LOGGER.info("Plugin Tester folders are ready: {}", root.toAbsolutePath());
-        } catch (IOException exception) {
-            LOGGER.error("Could not create PluginTester folders in {}", root.toAbsolutePath(), exception);
+            Files.createDirectories(PLUGINS);
+            Files.createDirectories(READY);
+            Files.createDirectories(REPORTS);
+            Files.createDirectories(SERVER);
+            createInstructions();
+        } catch (IOException e) {
+            System.err.println("[PluginTester] Cannot create folders: " + e.getMessage());
         }
+
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+            dispatcher.register(ClientCommandManager.literal("plugintester")
+                .then(ClientCommandManager.literal("scan").executes(ctx -> scan(ctx.getSource()::sendFeedback)))
+                .then(ClientCommandManager.literal("start").executes(ctx -> start(ctx.getSource()::sendFeedback)))
+                .then(ClientCommandManager.literal("stop").executes(ctx -> stop(ctx.getSource()::sendFeedback)))
+                .then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource()::sendFeedback)))
+                .then(ClientCommandManager.literal("promote")
+                    .then(ClientCommandManager.argument("file", StringArgumentType.greedyString())
+                        .executes(ctx -> promote(StringArgumentType.getString(ctx, "file"), ctx.getSource()::sendFeedback))))
+            )
+        );
+    }
+
+    @FunctionalInterface
+    private interface Feedback { void send(Text message); }
+
+    private static int scan(Feedback feedback) {
+        try {
+            Files.createDirectories(PLUGINS);
+            List<Path> jars;
+            try (var stream = Files.list(PLUGINS)) {
+                jars = stream.filter(p -> p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .sorted().toList();
+            }
+            if (jars.isEmpty()) {
+                feedback.send(Text.literal("[PluginTester] Папка plugins пуста: " + PLUGINS));
+                return 0;
+            }
+
+            Set<String> pluginNames = new HashSet<>();
+            List<ScanResult> results = new ArrayList<>();
+            for (Path jar : jars) {
+                ScanResult result = inspect(jar);
+                results.add(result);
+                if (result.pluginName != null) pluginNames.add(result.pluginName.toLowerCase(Locale.ROOT));
+            }
+
+            for (ScanResult result : results) {
+                for (String dependency : result.dependencies) {
+                    if (!pluginNames.contains(dependency.toLowerCase(Locale.ROOT))) {
+                        result.warnings.add("Не найдена зависимость: " + dependency);
+                    }
+                }
+            }
+
+            StringBuilder report = new StringBuilder("Plugin Tester report\n")
+                .append("Дата: ").append(new Date()).append("\n")
+                .append("Проверено JAR: ").append(results.size()).append("\n\n");
+            int passed = 0;
+            for (ScanResult result : results) {
+                if (result.errors.isEmpty()) passed++;
+                report.append(result.file.getFileName()).append(" — ")
+                    .append(result.errors.isEmpty() ? "СТРУКТУРА OK" : "ОШИБКИ").append("\n");
+                if (result.pluginName != null) report.append("  name: ").append(result.pluginName).append("\n");
+                if (result.mainClass != null) report.append("  main: ").append(result.mainClass).append("\n");
+                result.errors.forEach(s -> report.append("  ERROR: ").append(s).append("\n"));
+                result.warnings.forEach(s -> report.append("  WARNING: ").append(s).append("\n"));
+                report.append("\n");
+            }
+            Path reportFile = REPORTS.resolve("scan-" + System.currentTimeMillis() + ".txt");
+            Files.writeString(reportFile, report);
+            feedback.send(Text.literal("[PluginTester] Проверено: " + results.size()
+                + ", без структурных ошибок: " + passed + ". Отчёт: " + reportFile.getFileName()));
+            feedback.send(Text.literal("[PluginTester] Это статическая проверка, не гарантия совместимости. Для запуска: /plugintester start"));
+            return results.size();
+        } catch (Exception e) {
+            feedback.send(Text.literal("[PluginTester] Ошибка проверки: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static ScanResult inspect(Path jarPath) {
+        ScanResult result = new ScanResult(jarPath);
+        try (JarFile jar = new JarFile(jarPath.toFile())) {
+            var descriptor = jar.getJarEntry("plugin.yml");
+            if (descriptor == null) descriptor = jar.getJarEntry("paper-plugin.yml");
+            if (descriptor == null) {
+                result.errors.add("Нет plugin.yml или paper-plugin.yml — это может быть не Bukkit/Paper-плагин.");
+                return result;
+            }
+            String yaml;
+            try (var in = jar.getInputStream(descriptor)) {
+                yaml = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            result.pluginName = scalar(yaml, "name");
+            result.mainClass = scalar(yaml, "main");
+            if (result.pluginName == null) result.errors.add("В дескрипторе отсутствует name.");
+            if (result.mainClass == null) result.errors.add("В дескрипторе отсутствует main.");
+            else {
+                String classPath = result.mainClass.replace('.', '/') + ".class";
+                if (jar.getJarEntry(classPath) == null) result.errors.add("Главный класс не найден в JAR: " + result.mainClass);
+            }
+            result.dependencies.addAll(dependencies(yaml));
+            if (result.pluginName == null || result.mainClass == null) result.warnings.add("Дескриптор заполнен не полностью.");
+        } catch (Exception e) {
+            result.errors.add("Не удалось прочитать JAR: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private static String scalar(String yaml, String key) {
+        Matcher matcher = Pattern.compile("(?m)^" + Pattern.quote(key) + "\\s*:\\s*['\"]?([^\\r\\n#'\"]+)").matcher(yaml);
+        return matcher.find() ? matcher.group(1).trim() : null;
+    }
+
+    private static List<String> dependencies(String yaml) {
+        List<String> found = new ArrayList<>();
+        boolean inSection = false;
+        for (String line : yaml.split("\\R")) {
+            if (line.matches("^(depend|depend:|softdepend|softdepend:|loadbefore|loadbefore:)\\s*:?.*$")) {
+                inSection = true;
+                continue;
+            }
+            if (inSection && !line.isBlank() && !Character.isWhitespace(line.charAt(0))) inSection = false;
+            if (inSection) {
+                Matcher m = Pattern.compile("^\\s+-\\s*([A-Za-z0-9_.-]+)\\s*$").matcher(line);
+                if (m.find()) found.add(m.group(1));
+            }
+        }
+        return found;
+    }
+
+    private static int start(Feedback feedback) {
+        try {
+            if (serverProcess != null && serverProcess.isAlive()) {
+                feedback.send(Text.literal("[PluginTester] Тестовый сервер уже запущен."));
+                return 1;
+            }
+            Path paper = SERVER.resolve("paper.jar");
+            if (Files.notExists(paper)) {
+                feedback.send(Text.literal("[PluginTester] Сначала помести Paper 1.21.4 в PluginTester/server/paper.jar"));
+                return 0;
+            }
+            Path eula = SERVER.resolve("eula.txt");
+            if (Files.notExists(eula) || !Files.readString(eula).contains("eula=true")) {
+                if (Files.notExists(eula)) Files.writeString(eula, "eula=false\n");
+                feedback.send(Text.literal("[PluginTester] Для запуска прочитай EULA Minecraft и, если согласен, измени server/eula.txt на eula=true."));
+                return 0;
+            }
+            Path serverPlugins = SERVER.resolve("plugins");
+            Files.createDirectories(serverPlugins);
+            try (var stream = Files.list(PLUGINS)) {
+                for (Path file : stream.filter(p -> p.toString().toLowerCase(Locale.ROOT).endsWith(".jar")).toList()) {
+                    Files.copy(file, serverPlugins.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            Path log = REPORTS.resolve("paper-console.log");
+            ProcessBuilder builder = new ProcessBuilder(javaExecutable(), "-Xms512M", "-Xmx1024M",
+                "-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200", "-jar", "paper.jar", "--nogui")
+                .directory(SERVER.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
+            serverProcess = builder.start();
+            feedback.send(Text.literal("[PluginTester] Paper запускается. RAM: 512 МБ–1 ГБ. Лог: reports/paper-console.log"));
+            feedback.send(Text.literal("[PluginTester] Подключение в Minecraft: localhost (если сервер успешно загрузился)."));
+            return 1;
+        } catch (Exception e) {
+            feedback.send(Text.literal("[PluginTester] Не удалось запустить Paper: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static String javaExecutable() {
+        String executable = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", executable).toString();
+    }
+
+    private static int stop(Feedback feedback) {
+        try {
+            if (serverProcess == null || !serverProcess.isAlive()) {
+                feedback.send(Text.literal("[PluginTester] Сервер не запущен."));
+                return 0;
+            }
+            // The process is stopped gracefully through the helper console command file.
+            Path stopFlag = SERVER.resolve("STOP_SERVER");
+            Files.writeString(stopFlag, "stop");
+            feedback.send(Text.literal("[PluginTester] Для безопасной остановки введи stop в консоль Paper. Затем сервер завершится."));
+            feedback.send(Text.literal("[PluginTester] Консольный вывод находится в reports/paper-console.log."));
+            return 1;
+        } catch (IOException e) {
+            feedback.send(Text.literal("[PluginTester] Ошибка: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int status(Feedback feedback) {
+        boolean running = serverProcess != null && serverProcess.isAlive();
+        feedback.send(Text.literal("[PluginTester] Paper: " + (running ? "работает" : "остановлен")));
+        return running ? 1 : 0;
+    }
+
+    private static int promote(String fileName, Feedback feedback) {
+        try {
+            Path name = Path.of(fileName);
+            if (name.isAbsolute() || name.getNameCount() != 1 || !name.getFileName().toString().endsWith(".jar")) {
+                feedback.send(Text.literal("[PluginTester] Укажи только имя JAR-файла, без путей."));
+                return 0;
+            }
+            Path source = PLUGINS.resolve(name);
+            if (Files.notExists(source)) {
+                feedback.send(Text.literal("[PluginTester] Файл не найден в папке plugins."));
+                return 0;
+            }
+            ScanResult result = inspect(source);
+            if (!result.errors.isEmpty()) {
+                feedback.send(Text.literal("[PluginTester] Нельзя перенести: статическая проверка нашла ошибки. Сначала исправь их."));
+                return 0;
+            }
+            Files.copy(source, READY.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+            feedback.send(Text.literal("[PluginTester] Файл скопирован в ready. Важно: это не подтверждает успешную работу на сервере."));
+            return 1;
+        } catch (Exception e) {
+            feedback.send(Text.literal("[PluginTester] Ошибка переноса: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static void createInstructions() throws IOException {
+        Path instructions = ROOT.resolve("ИНСТРУКЦИЯ.txt");
+        if (Files.notExists(instructions)) {
+            Files.writeString(instructions,
+                "PLUGIN TESTER — Minecraft 1.21.4\n\n" +
+                "1. Помести Bukkit/Paper .jar в папку plugins.\n" +
+                "2. В игре выполни /plugintester scan — проверка структуры и plugin.yml.\n" +
+                "3. Для реального теста скачай Paper 1.21.4 и положи файл как server/paper.jar.\n" +
+                "4. Прочитай EULA. Если согласен, поменяй eula=false на eula=true в server/eula.txt.\n" +
+                "5. Выполни /plugintester start. Подключись к localhost.\n" +
+                "6. Логи Paper: reports/paper-console.log.\n" +
+                "7. /plugintester promote имя.jar копирует JAR в ready после статической проверки.\n\n" +
+                "Команды: /plugintester scan | start | stop | status | promote <имя.jar>\n" +
+                "Paper-плагины не работают внутри одиночного мира Fabric. Запускается отдельный локальный Paper-сервер.\n" +
+                "Сервер использует Java 21, -Xms512M и -Xmx1024M. Для остановки введи stop в консоль Paper.\n");
+        }
+    }
+
+    private static final class ScanResult {
+        final Path file;
+        final List<String> errors = new ArrayList<>();
+        final List<String> warnings = new ArrayList<>();
+        final List<String> dependencies = new ArrayList<>();
+        String pluginName;
+        String mainClass;
+        ScanResult(Path file) { this.file = file; }
     }
 }
