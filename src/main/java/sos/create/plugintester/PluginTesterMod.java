@@ -358,7 +358,7 @@ public final class PluginTesterMod {
         Path instructions = ROOT.resolve("ИНСТРУКЦИЯ.txt");
         if (Files.notExists(instructions)) {
             Files.writeString(instructions,
-                "PLUGIN TESTER — Forge / Minecraft 1.21.4\n\n" +
+                "PLUGIN TESTER — Forge / Minecraft 1.21.11\nТестовый сервер: Paper 1.21.4\n\n" +
                 "1. Помести Bukkit/Paper .jar в папку plugins.\n" +
                 "2. В игре выполни /plugintester scan — проверка структуры и plugin.yml.\n" +
                 "3. Для реального теста скачай Paper " + PAPER_VERSION + " и положи файл как server/paper.jar.\n" +
